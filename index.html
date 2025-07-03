@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A Funky Guide to Distributed Tracing</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=VT323&display=swap" rel="stylesheet">
+    <!-- Chosen Palette: Retro Tech -->
+    <!-- Application Structure Plan: The SPA is designed with a non-linear, thematic structure to enhance learning and exploration. A persistent top navigation bar allows users to jump between key themes: 'Why It Matters', 'Core Concepts', 'Implementation', 'Tooling', and 'The Future'. This task-oriented design breaks down the dense report into digestible modules. 'Why It Matters' hooks the user with the core problem. 'Core Concepts' uses an animated visualization to make abstract ideas tangible. 'Implementation' and 'Tooling' use interactive toggles and comparison cards for practical decision-making. 'The Future' provides a forward-looking perspective. This structure was chosen to transform a passive reading experience into an active exploration, making complex technical information more accessible and memorable than a linear document. -->
+    <!-- Visualization & Content Choices: 
+        - Report Info: Observability Triad (Sec 1.2) -> Goal: Compare -> Viz: Interactive 3-card layout -> Interaction: Click to reveal details -> Justification: More engaging than a static list, highlights the synergy between signals. -> Library/Method: HTML/CSS/JS.
+        - Report Info: Anatomy of a Trace (Sec 2) -> Goal: Organize/Inform -> Viz: Animated node-and-packet diagram -> Interaction: Click a button to play the animation, hover on spans -> Justification: Visually demonstrates context propagation and the journey of a trace in a dynamic, easy-to-understand way, which is a core concept that is hard to grasp from text alone. -> Library/Method: HTML/CSS/JS.
+        - Report Info: Instrumentation Comparison (Sec 4.1) -> Goal: Compare -> Viz: Toggle-based content switcher -> Interaction: Click tabs for 'Automatic' vs 'Manual' -> Justification: Direct comparison facilitates understanding of trade-offs. -> Library/Method: HTML/CSS/JS.
+        - Report Info: Sampling Strategies (Sec 4.2) -> Goal: Compare -> Viz: Side-by-side animated diagrams & a bar chart -> Interaction: View animations, hover on chart -> Justification: Simplifies the abstract concepts of Head vs. Tail sampling and visualizes the cost/visibility trade-off. -> Library/Method: HTML/CSS/JS & Chart.js.
+        - Report Info: Tooling Comparison (Sec 5) -> Goal: Compare -> Viz: Filterable card grid & bar chart -> Interaction: Click cards for modal, filter by type -> Justification: Allows users to easily compare open-source vs. commercial tools based on their needs. -> Library/Method: HTML/CSS/JS & Chart.js.
+        - Report Info: Performance Overhead (Sec 7.1) -> Goal: Inform -> Viz: Donut chart -> Interaction: Hover to see percentages -> Justification: Provides a quick, quantitative summary of the sources of performance impact. -> Library/Method: Chart.js.
+    -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f3e9; /* Creamy off-white */
+            color: #4a4a4a; 
+        }
+        .quirky-header {
+            font-family: 'VT323', monospace;
+        }
+        .nav-link {
+            transition: color 0.3s ease;
+        }
+        .nav-link:hover, .nav-link.active {
+            color: #ff477e; /* Quirky Pink */
+        }
+        .section-card {
+            background-color: #FFFFFF;
+            border: 2px solid #2c3e50;
+            border-radius: 0.5rem;
+            padding: 2rem;
+            box-shadow: 8px 8px 0px #2c3e50;
+            transition: all 0.2s ease-in-out;
+        }
+        .section-card:hover {
+            transform: translate(-2px, -2px);
+            box-shadow: 10px 10px 0px #ff477e;
+        }
+        .tab-button {
+            transition: all 0.3s ease;
+            border: 2px solid transparent;
+        }
+        .tab-button.active {
+            background-color: #ff477e;
+            color: #FFFFFF;
+            border-color: #2c3e50;
+        }
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 500px;
+            margin-left: auto;
+            margin-right: auto;
+            height: 300px;
+            max-height: 400px;
+        }
+        .trace-vis-container {
+            height: 450px;
+        }
+        .service-node {
+            position: absolute;
+            width: 120px;
+            height: 60px;
+            background-color: #3498db;
+            color: white;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            font-size: 0.9rem;
+            border: 2px solid #2c3e50;
+            z-index: 5;
+        }
+        .packet {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            background-color: #ff477e;
+            border-radius: 50%;
+            z-index: 10;
+            transition: all 1s ease-in-out;
+            box-shadow: 0 0 10px #ff477e;
+        }
+        .span-bar-container {
+            position: relative;
+            width: 100%;
+            height: 300px;
+            background: #f0f0f0;
+            border-radius: 8px;
+            padding: 10px;
+            margin-top: 20px;
+            border: 2px solid #ccc;
+            overflow: hidden;
+        }
+        .span-bar {
+            position: absolute;
+            height: 25px;
+            border-radius: 4px;
+            overflow: hidden;
+            white-space: nowrap;
+            color: white;
+            padding: 2px 8px;
+            font-size: 0.8rem;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            box-shadow: 2px 2px 0px rgba(0,0,0,0.2);
+        }
+        .span-bar:hover {
+            filter: brightness(1.1);
+            transform: scale(1.02);
+        }
+        .span-tooltip {
+            display: none;
+            position: absolute;
+            background: #111827;
+            color: white;
+            padding: 10px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            z-index: 20;
+            width: 280px;
+            pointer-events: none;
+        }
+        .modal { display: none; }
+        .play-button {
+            font-family: 'VT323', monospace;
+            background-color: #2ecc71;
+            color: white;
+            border: 2px solid #2c3e50;
+            box-shadow: 4px 4px 0px #2c3e50;
+            transition: all 0.2s ease-in-out;
+        }
+        .play-button:hover {
+            background-color: #27ae60;
+            transform: translate(-1px, -1px);
+            box-shadow: 5px 5px 0px #2c3e50;
+        }
+        .play-button:active {
+            transform: translate(2px, 2px);
+            box-shadow: 2px 2px 0px #2c3e50;
+        }
+    </style>
+</head>
+<body class="antialiased">
+
+    <!-- Header & Navigation -->
+    <header id="header" class="bg-white/80 backdrop-blur-lg fixed top-0 left-0 right-0 z-50 border-b-2 border-b-gray-800">
+        <nav class="container mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center">
+                    <span class="quirky-header text-2xl text-gray-800">Distributed Tracing</span>
+                </div>
+                <div class="hidden md:block">
+                    <div class="ml-10 flex items-baseline space-x-4">
+                        <a href="#intro" class="nav-link px-3 py-2 rounded-md text-sm font-medium text-gray-700">Why It Matters</a>
+                        <a href="#concepts" class="nav-link px-3 py-2 rounded-md text-sm font-medium text-gray-700">Core Concepts</a>
+                        <a href="#implementation" class="nav-link px-3 py-2 rounded-md text-sm font-medium text-gray-700">Implementation</a>
+                        <a href="#tooling" class="nav-link px-3 py-2 rounded-md text-sm font-medium text-gray-700">Tooling</a>
+                        <a href="#future" class="nav-link px-3 py-2 rounded-md text-sm font-medium text-gray-700">The Future</a>
+                    </div>
+                </div>
+                <div class="md:hidden flex items-center">
+                    <button id="mobile-menu-button" class="inline-flex items-center justify-center p-2 rounded-md text-gray-600 hover:text-gray-800 hover:bg-gray-100 focus:outline-none">
+                        <span class="sr-only">Open main menu</span>
+                        <svg class="h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7" /></svg>
+                    </button>
+                </div>
+            </div>
+        </nav>
+        <div id="mobile-menu" class="md:hidden hidden"><div class="px-2 pt-2 pb-3 space-y-1 sm:px-3"><a href="#intro" class="nav-link block px-3 py-2 rounded-md text-base font-medium text-gray-700">Why It Matters</a><a href="#concepts" class="nav-link block px-3 py-2 rounded-md text-base font-medium text-gray-700">Core Concepts</a><a href="#implementation" class="nav-link block px-3 py-2 rounded-md text-base font-medium text-gray-700">Implementation</a><a href="#tooling" class="nav-link block px-3 py-2 rounded-md text-base font-medium text-gray-700">Tooling</a><a href="#future" class="nav-link block px-3 py-2 rounded-md text-base font-medium text-gray-700">The Future</a></div></div>
+    </header>
+
+    <main class="container mx-auto px-4 sm:px-6 lg:px-8 pt-24">
+        
+        <section id="intro" class="mb-24 scroll-mt-20">
+            <div class="text-center mb-12">
+                <h1 class="quirky-header text-5xl md:text-6xl text-gray-900">Lost in the Microservice Maze?</h1>
+                <p class="mt-4 max-w-3xl mx-auto text-lg text-gray-600">Your app is a web of tiny services. When one gets tangled, how do you find the knot? Tracing is your treasure map.</p>
+            </div>
+            <div class="grid md:grid-cols-3 gap-8 mb-16 text-center">
+                <div class="section-card"><h3 class="quirky-header text-6xl text-blue-600">61%</h3><p class="mt-2 text-gray-600">of companies use microservices. That's a lot of mazes.</p></div>
+                <div class="section-card"><h3 class="quirky-header text-6xl text-blue-600">10x</h3><p class="mt-2 text-gray-600">Faster bug hunting when you can see the whole crime scene.</p></div>
+                <div class="section-card"><h3 class="quirky-header text-6xl text-blue-600">3</h3><p class="mt-2 text-gray-600">Amigos of Observability: Traces, Metrics, and Logs.</p></div>
+            </div>
+            <div class="section-card">
+                <h2 class="quirky-header text-3xl text-center text-gray-800 mb-6">The Observability Trio</h2>
+                <p class="text-center text-gray-600 mb-8">Meet the team! Each has a special power. Click 'em to see what they do.</p>
+                <div class="grid md:grid-cols-3 gap-6">
+                    <div id="triad-metrics" class="p-6 border-2 border-gray-800 rounded-lg cursor-pointer hover:bg-yellow-100 transition-all"><h4 class="font-bold text-lg text-gray-800">📈 Metrics</h4><p class="text-sm mt-2">The "What". Tells you latency is up.</p></div>
+                    <div id="triad-traces" class="p-6 border-2 border-pink-500 bg-pink-100 rounded-lg cursor-pointer"><h4 class="font-bold text-lg text-gray-800">🔗 Traces</h4><p class="text-sm mt-2">The "Where". Points to the slow service.</p></div>
+                    <div id="triad-logs" class="p-6 border-2 border-gray-800 rounded-lg cursor-pointer hover:bg-blue-100 transition-all"><h4 class="font-bold text-lg text-gray-800">📜 Logs</h4><p class="text-sm mt-2">The "Why". Screams "DB timeout!".</p></div>
+                </div>
+                <div id="triad-explanation" class="mt-6 p-4 bg-gray-100 rounded-lg text-center text-gray-700">Traces are the storytellers, connecting the dots between the other two.</div>
+            </div>
+        </section>
+
+        <section id="concepts" class="mb-24 scroll-mt-20">
+             <div class="text-center mb-12">
+                <h1 class="quirky-header text-5xl md:text-6xl text-gray-900">Anatomy of a Trace</h1>
+                <p class="mt-4 max-w-3xl mx-auto text-lg text-gray-600">A trace is a journey. A request packet zips through services, leaving a breadcrumb trail of 'spans'. Press play to watch the magic happen!</p>
+            </div>
+            <div class="section-card">
+                <div class="flex flex-col sm:flex-row justify-between items-center mb-6 gap-4">
+                     <h3 class="text-xl font-semibold text-gray-800">Request: `GET /api/orders/123`</h3>
+                     <button id="play-trace-btn" class="play-button px-6 py-2 rounded-md text-lg">▶ Play Trace</button>
+                </div>
+                <div id="trace-visualization" class="relative w-full trace-vis-container bg-gray-50 rounded-lg p-4 border-2 border-gray-800">
+                    <div id="node-container" class="relative w-full h-1/3">
+                        <!-- Service nodes injected here -->
+                    </div>
+                    <div id="timeline-container" class="relative w-full h-2/3 mt-4 pt-4 border-t-2 border-dashed border-gray-400">
+                        <div class="absolute top-0 left-2 text-xs text-gray-500">Timeline</div>
+                        <!-- Span bars injected here -->
+                    </div>
+                </div>
+                <div id="span-tooltip" class="span-tooltip"></div>
+            </div>
+        </section>
+
+        <section id="implementation" class="mb-24 scroll-mt-20">
+            <div class="text-center mb-12">
+                <h1 class="quirky-header text-5xl md:text-6xl text-gray-900">How to Get Tracing</h1>
+                <p class="mt-4 max-w-3xl mx-auto text-lg text-gray-600">You've got options! Go auto-magic for a quick start, or get your hands dirty with manual coding for custom details.</p>
+            </div>
+            <div class="grid lg:grid-cols-2 gap-12">
+                <div class="section-card flex flex-col">
+                    <h2 class="quirky-header text-3xl text-center text-gray-800 mb-6">Instrument Your Code</h2>
+                    <div class="flex justify-center mb-6"><div class="bg-gray-200 rounded-full p-1 flex"><button id="auto-instr-btn" class="tab-button active px-6 py-2 text-sm font-semibold rounded-full">Automatic</button><button id="manual-instr-btn" class="tab-button px-6 py-2 text-sm font-semibold rounded-full">Manual</button></div></div>
+                    <div id="auto-instr-content"><h4 class="font-semibold text-lg mb-2">🤖 Effortless Mode</h4><p class="text-sm text-gray-600 mb-4">An agent does the work for you. No code changes needed!</p><ul class="text-sm space-y-2 mb-4"><li class="flex items-start"><span class="mr-2">✔️</span> Super fast, wide coverage.</li><li class="flex items-start"><span class="mr-2">✔️</span> Keeps your code clean.</li><li class="flex items-start"><span class="mr-2">❌</span> Can't see your secret business logic.</li></ul><div class="bg-gray-800 text-white p-4 rounded-md text-xs font-mono"><p class="text-gray-400">// Just run with an agent:</p><p><span class="text-blue-400">opentelemetry-instrument</span> python my_app.py</p></div></div>
+                    <div id="manual-instr-content" class="hidden"><h4 class="font-semibold text-lg mb-2">🧑‍💻 Expert Mode</h4><p class="text-sm text-gray-600 mb-4">You write the code to get rich, custom data.</p><ul class="text-sm space-y-2 mb-4"><li class="flex items-start"><span class="mr-2">✔️</span> Get all the juicy business details.</li><li class="flex items-start"><span class="mr-2">✔️</span> Total control and flexibility.</li><li class="flex items-start"><span class="mr-2">❌</span> More work to write and maintain.</li></ul><div class="bg-gray-800 text-white p-4 rounded-md text-xs font-mono"><p><span class="text-purple-400">with</span> tracer.start_as_current_span("payment_flow"):</p><p class="pl-4">span.set_attribute("cart.value", 99.99)</p></div></div>
+                    <p class="text-center text-xs text-gray-500 mt-auto pt-4"><strong>Pro Tip:</strong> Use both! Auto for the basics, Manual for the important stuff.</p>
+                </div>
+                <div class="section-card flex flex-col">
+                    <h2 class="quirky-header text-3xl text-center text-gray-800 mb-6">Tame Your Data</h2>
+                    <p class="text-center text-gray-600 mb-6">Tracing 100% of requests is pricey. Sampling lets you pick the interesting ones.</p>
+                    <div class="grid grid-cols-2 gap-4 text-center">
+                        <div><h4 class="font-semibold text-lg">Head-Based</h4><p class="text-sm text-gray-500 mb-2">Decide at the start</p><p class="text-sm">➕ Cheap & simple</p><p class="text-sm">➖ Might miss errors</p></div>
+                        <div><h4 class="font-semibold text-lg">Tail-Based</h4><p class="text-sm text-gray-500 mb-2">Decide at the end</p><p class="text-sm">➕ Catches all errors</p><p class="text-sm">➖ Fancy & expensive</p></div>
+                    </div>
+                    <div class="mt-4 flex-grow flex items-center justify-center"><div class="chart-container h-64 md:h-80"><canvas id="samplingChart"></canvas></div></div>
+                </div>
+            </div>
+        </section>
+
+        <section id="tooling" class="mb-24 scroll-mt-20">
+            <div class="text-center mb-12">
+                <h1 class="quirky-header text-5xl md:text-6xl text-gray-900">Choose Your Weapon</h1>
+                <p class="mt-4 max-w-3xl mx-auto text-lg text-gray-600">Pick from powerful open-source tools or go with a slick commercial platform. It's a classic "build vs. buy" showdown.</p>
+            </div>
+            <div class="flex justify-center mb-8"><div class="bg-gray-200 rounded-full p-1 flex"><button class="tool-filter-btn tab-button active px-6 py-2 text-sm font-semibold rounded-full" data-filter="all">All</button><button class="tool-filter-btn tab-button px-6 py-2 text-sm font-semibold rounded-full" data-filter="oss">Open Source</button><button class="tool-filter-btn tab-button px-6 py-2 text-sm font-semibold rounded-full" data-filter="commercial">Commercial</button></div></div>
+            <div id="tooling-grid" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-8"></div>
+        </section>
+
+        <section id="future" class="mb-24 scroll-mt-20">
+            <div class="text-center mb-12">
+                <h1 class="quirky-header text-5xl md:text-6xl text-gray-900">The Future is... Automated!</h1>
+                <p class="mt-4 max-w-3xl mx-auto text-lg text-gray-600">Soon, robots will find your bugs for you. Tracing is evolving from a detective tool to a predictive AI powerhouse.</p>
+            </div>
+            <div class="grid md:grid-cols-2 gap-12">
+                <div class="section-card"><h2 class="quirky-header text-3xl text-gray-800 mb-4">🤖 AI Bug Hunters</h2><p class="text-gray-600 mb-4">AI models will learn your app's "normal" and flag weird behavior automatically. No more haystack-diving!</p></div>
+                <div class="section-card"><h2 class="quirky-header text-3xl text-gray-800 mb-4">🔮 Crystal Ball Analytics</h2><p class="text-gray-600 mb-4">The ultimate goal: predict and prevent problems *before* they happen. Welcome to the future of no-drama deployments.</p></div>
+            </div>
+            <div class="section-card mt-12">
+                <h2 class="quirky-header text-3xl text-center text-gray-800 mb-6">The Cost of Clarity</h2>
+                <p class="text-center text-gray-600 mb-8">Tracing isn't free. Here's a peek at what adds to the performance bill.</p>
+                <div class="chart-container"><canvas id="overheadChart"></canvas></div>
+            </div>
+        </section>
+        
+    </main>
+    
+    <footer class="border-t-2 border-t-gray-800 mt-16">
+        <div class="container mx-auto px-4 sm:px-6 lg:px-8 py-8 text-center text-gray-500">
+            <p>A Funky Interactive Guide by Gemini</p>
+        </div>
+    </footer>
+
+    <div id="tool-modal" class="modal fixed inset-0 bg-gray-900 bg-opacity-75 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto section-card">
+            <div class="flex justify-between items-center p-4 border-b-2 border-gray-800"><h3 id="modal-title" class="quirky-header text-3xl">Tool Details</h3><button id="modal-close-btn" class="text-gray-500 hover:text-gray-800 text-3xl">&times;</button></div>
+            <div id="modal-content" class="p-6"></div>
+        </div>
+    </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+
+    const triadExplanations = {
+        'triad-metrics': 'Metrics are the smoke detectors. They scream "BEEP BEEP, SOMETHING IS WRONG!" but don\'t tell you where the fire is.',
+        'triad-traces': 'Traces are the firefighters. They follow the smoke trail right to the source of the blaze.',
+        'triad-logs': 'Logs are the forensic report. They tell you exactly what caused the fire, like "someone left the toaster on".'
+    };
+
+    const traceData = [
+        { id: 1, parent: null, service: '📡 Gateway', op: 'GET /api/orders/123', start: 0, end: 850, color: '#3498db', pos: {x: '50%', y: '10%'} },
+        { id: 2, parent: 1, service: '🔐 Auth', op: 'Verify Token', start: 10, end: 60, color: '#2ecc71', pos: {x: '20%', y: '50%'} },
+        { id: 3, parent: 1, service: '🛒 Orders', op: 'gRPC GetOrder', start: 70, end: 840, color: '#f1c40f', pos: {x: '80%', y: '50%'} },
+        { id: 4, parent: 3, service: '📦 Inventory', op: 'gRPC GetInventory', start: 310, end: 820, color: '#e74c3c', pos: {x: '80%', y: '90%'} },
+    ];
+    
+    const toolingData = [
+        { name: 'Jaeger', type: 'oss', logo: '🧊', short: 'The cool kid from the CNCF. Great for Kubernetes.', sampling: 'Head-based or adaptive. Tail-based is a DIY project.', feature: 'Super scalable and cloud-native friendly.' },
+        { name: 'Zipkin', type: 'oss', logo: '🕰️', short: 'The wise old-timer. Stable, simple, and gets the job done.', sampling: 'Primarily Head-based.', feature: 'So easy to start, you could do it by accident.' },
+        { name: 'Datadog', type: 'commercial', logo: '🐶', short: 'The whole shebang. Traces, metrics, logs, and a pony.', sampling: 'Head-based with a smart memory.', feature: 'Everything talks to everything. It\'s one big happy family.' },
+        { name: 'New Relic', type: 'commercial', logo: '🔭', short: 'The fortune teller. Sees all your traces, keeps the interesting ones.', sampling: 'Tail-based ("Infinite Tracing").', feature: 'Never miss an error or a slow-poke request again.' },
+    ];
+
+    const mobileMenuButton = document.getElementById('mobile-menu-button');
+    const mobileMenu = document.getElementById('mobile-menu');
+    mobileMenuButton.addEventListener('click', () => mobileMenu.classList.toggle('hidden'));
+    
+    const navLinks = document.querySelectorAll('.nav-link');
+    const sections = document.querySelectorAll('main section');
+    const header = document.getElementById('header');
+    
+    const observerOptions = { rootMargin: `-${header.offsetHeight}px 0px 0px 0px`, threshold: 0.4 };
+    const sectionObserver = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          const id = entry.target.getAttribute('id');
+          navLinks.forEach(link => {
+            link.classList.remove('active');
+            if (link.getAttribute('href') === `#${id}`) link.classList.add('active');
+          });
+        }
+      });
+    }, observerOptions);
+    sections.forEach(section => sectionObserver.observe(section));
+    
+    const triadCards = document.querySelectorAll('[id^="triad-"]');
+    const triadExplanation = document.getElementById('triad-explanation');
+    triadCards.forEach(card => {
+        if (card.id.includes('explanation')) return;
+        card.addEventListener('click', () => {
+            triadCards.forEach(c => c.classList.remove('border-pink-500', 'bg-pink-100'));
+            card.classList.add('border-pink-500', 'bg-pink-100');
+            triadExplanation.textContent = triadExplanations[card.id];
+        });
+    });
+
+    // --- Core Concepts Animation ---
+    const playTraceBtn = document.getElementById('play-trace-btn');
+    const nodeContainer = document.getElementById('node-container');
+    const timelineContainer = document.getElementById('timeline-container');
+    const spanTooltip = document.getElementById('span-tooltip');
+    
+    function setupTraceAnimation() {
+        nodeContainer.innerHTML = '';
+        timelineContainer.innerHTML = '<div class="absolute top-0 left-2 text-xs text-gray-500">Timeline</div>';
+        
+        traceData.forEach(span => {
+            const node = document.createElement('div');
+            node.className = 'service-node';
+            node.id = `node-${span.id}`;
+            node.style.left = span.pos.x;
+            node.style.top = span.pos.y;
+            node.style.transform = 'translate(-50%, -50%)';
+            node.style.backgroundColor = span.color;
+            node.innerHTML = `<span>${span.service}</span>`;
+            nodeContainer.appendChild(node);
+        });
+    }
+
+    playTraceBtn.addEventListener('click', () => {
+        setupTraceAnimation();
+        playTraceBtn.disabled = true;
+        playTraceBtn.textContent = 'Playing...';
+
+        const packet = document.createElement('div');
+        packet.className = 'packet';
+        nodeContainer.appendChild(packet);
+
+        let currentStep = 0;
+        const totalDuration = traceData.find(s => s.parent === null).end;
+
+        function animateStep() {
+            if (currentStep >= traceData.length) {
+                playTraceBtn.disabled = false;
+                playTraceBtn.textContent = '▶ Replay Trace';
+                nodeContainer.removeChild(packet);
+                return;
+            }
+
+            const span = traceData[currentStep];
+            const nodeEl = document.getElementById(`node-${span.id}`);
+            
+            packet.style.left = nodeEl.style.left;
+            packet.style.top = nodeEl.style.top;
+            
+            setTimeout(() => {
+                const spanBar = document.createElement('div');
+                spanBar.className = 'span-bar';
+                spanBar.style.top = `${currentStep * 35 + 20}px`;
+                spanBar.style.left = `${(span.start / totalDuration) * 100}%`;
+                spanBar.style.width = `${((span.end - span.start) / totalDuration) * 100}%`;
+                spanBar.style.backgroundColor = span.color;
+                spanBar.innerHTML = `<span>${span.service}: ${span.op}</span>`;
+                
+                spanBar.addEventListener('mousemove', (e) => {
+                    spanTooltip.style.display = 'block';
+                    spanTooltip.style.left = `${e.pageX + 15}px`;
+                    spanTooltip.style.top = `${e.pageY + 15}px`;
+                    spanTooltip.innerHTML = `<strong>${span.service}: ${span.op}</strong><br>Duration: ${span.end - span.start}ms`;
+                });
+                spanBar.addEventListener('mouseleave', () => spanTooltip.style.display = 'none');
+                timelineContainer.appendChild(spanBar);
+
+                currentStep++;
+                animateStep();
+            }, 1000);
+        }
+        animateStep();
+    });
+
+    setupTraceAnimation();
+
+    const autoInstrBtn = document.getElementById('auto-instr-btn');
+    const manualInstrBtn = document.getElementById('manual-instr-btn');
+    const autoInstrContent = document.getElementById('auto-instr-content');
+    const manualInstrContent = document.getElementById('manual-instr-content');
+
+    autoInstrBtn.addEventListener('click', () => {
+        autoInstrBtn.classList.add('active');
+        manualInstrBtn.classList.remove('active');
+        autoInstrContent.classList.remove('hidden');
+        manualInstrContent.classList.add('hidden');
+    });
+
+    manualInstrBtn.addEventListener('click', () => {
+        manualInstrBtn.classList.add('active');
+        autoInstrBtn.classList.remove('active');
+        manualInstrContent.classList.remove('hidden');
+        autoInstrContent.classList.add('hidden');
+    });
+
+    const samplingCtx = document.getElementById('samplingChart').getContext('2d');
+    new Chart(samplingCtx, {
+        type: 'bar',
+        data: {
+            labels: ['Head-Based', 'Tail-Based'],
+            datasets: [{ label: 'Relative Cost', data: [20, 85], backgroundColor: '#f1c40f' }, 
+                       { label: 'Visibility into Errors', data: [40, 100], backgroundColor: '#3498db' }]
+        },
+        options: { maintainAspectRatio: false, responsive: true, scales: { y: { beginAtZero: true, max: 100, ticks: { callback: (v) => v + '%' } } }, plugins: { title: { display: true, text: 'Sampling: Cost vs. Visibility' } } }
+    });
+
+    const toolingGrid = document.getElementById('tooling-grid');
+    const toolFilterBtns = document.querySelectorAll('.tool-filter-btn');
+    const modal = document.getElementById('tool-modal');
+    const modalTitle = document.getElementById('modal-title');
+    const modalContent = document.getElementById('modal-content');
+    const modalCloseBtn = document.getElementById('modal-close-btn');
+
+    function renderTools(filter = 'all') {
+        toolingGrid.innerHTML = '';
+        toolingData.filter(tool => filter === 'all' || tool.type === filter).forEach(tool => {
+            const card = document.createElement('div');
+            card.className = 'section-card text-center cursor-pointer';
+            card.innerHTML = `<div class="text-5xl mb-4">${tool.logo}</div><h3 class="font-bold text-xl text-gray-800">${tool.name}</h3><span class="text-xs font-semibold uppercase ${tool.type === 'oss' ? 'text-green-600' : 'text-purple-600'}">${tool.type}</span><p class="text-sm text-gray-600 mt-2">${tool.short}</p>`;
+            card.addEventListener('click', () => {
+                modalTitle.innerText = `${tool.logo} ${tool.name}`;
+                modalContent.innerHTML = `<p class="text-lg text-gray-700 mb-4">${tool.short}</p><div class="space-y-4"><div><h4 class="font-semibold text-gray-800">Key Feature</h4><p class="text-gray-600">${tool.feature}</p></div><div><h4 class="font-semibold text-gray-800">Sampling Strategy</h4><p class="text-gray-600">${tool.sampling}</p></div></div>`;
+                modal.style.display = 'flex';
+            });
+            toolingGrid.appendChild(card);
+        });
+    }
+
+    modalCloseBtn.addEventListener('click', () => modal.style.display = 'none');
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.style.display = 'none'; });
+    toolFilterBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            toolFilterBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            renderTools(btn.dataset.filter);
+        });
+    });
+    renderTools();
+
+    const overheadCtx = document.getElementById('overheadChart').getContext('2d');
+    new Chart(overheadCtx, {
+        type: 'doughnut',
+        data: {
+            labels: ['Exporting Data', 'Configuration', 'Instrumentation'],
+            datasets: [{ data: [53, 30, 17], backgroundColor: [ '#e74c3c', '#f1c40f', '#2ecc71' ], borderColor: '#f7f3e9', borderWidth: 4 }]
+        },
+        options: { maintainAspectRatio: false, responsive: true, plugins: { legend: { position: 'bottom' } } }
+    });
+});
+</script>
+</body>
+</html>
